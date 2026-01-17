@@ -1,0 +1,28 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install curl for healthcheck
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency files
+COPY pyproject.toml ./
+
+# Install dependencies using pip (extract from pyproject.toml)
+RUN pip install --no-cache-dir \
+    "fastapi>=0.115.0" \
+    "uvicorn[standard]>=0.32.0" \
+    "python-dotenv>=1.0.0" \
+    "httpx>=0.27.0" \
+    "pydantic>=2.9.0"
+
+# Copy backend code
+COPY backend/ ./backend/
+
+# Create data directory
+RUN mkdir -p data/conversations
+
+EXPOSE 8001
+
+# Run as module to handle relative imports correctly
+CMD ["python", "-m", "backend.main"]
