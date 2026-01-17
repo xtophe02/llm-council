@@ -6,10 +6,57 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8001';
 
 export const api = {
   /**
+   * Check authentication status.
+   */
+  async checkAuth() {
+    const response = await fetch(`${API_BASE}/api/auth/status`, {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to check auth status');
+    }
+    return response.json();
+  },
+
+  /**
+   * Log in with password.
+   */
+  async login(password) {
+    const response = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ password }),
+    });
+    if (!response.ok) {
+      throw new Error('Invalid password');
+    }
+    return response.json();
+  },
+
+  /**
+   * Log out.
+   */
+  async logout() {
+    const response = await fetch(`${API_BASE}/api/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to logout');
+    }
+    return response.json();
+  },
+
+  /**
    * List all conversations.
    */
   async listConversations() {
-    const response = await fetch(`${API_BASE}/api/conversations`);
+    const response = await fetch(`${API_BASE}/api/conversations`, {
+      credentials: 'include',
+    });
     if (!response.ok) {
       throw new Error('Failed to list conversations');
     }
@@ -25,6 +72,7 @@ export const api = {
       headers: {
         'Content-Type': 'application/json',
       },
+      credentials: 'include',
       body: JSON.stringify({}),
     });
     if (!response.ok) {
@@ -38,7 +86,10 @@ export const api = {
    */
   async getConversation(conversationId) {
     const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}`
+      `${API_BASE}/api/conversations/${conversationId}`,
+      {
+        credentials: 'include',
+      }
     );
     if (!response.ok) {
       throw new Error('Failed to get conversation');
@@ -57,6 +108,7 @@ export const api = {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({ content }),
       }
     );
@@ -81,6 +133,7 @@ export const api = {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({ content }),
       }
     );

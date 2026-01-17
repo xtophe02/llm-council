@@ -1,6 +1,6 @@
 """FastAPI backend for LLM Council."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -11,25 +11,24 @@ import asyncio
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .auth import verify_password, create_session, delete_session, get_session_token, require_auth, validate_session
+from .config import AUTH_PASSWORD, CORS_ORIGINS
 
 app = FastAPI(title="LLM Council API")
 
-# Enable CORS for local development
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://localhost:3003",
-        "http://localhost:3004",
-        "http://localhost:3005",
-    ],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class LoginRequest(BaseModel):
+    """Request to log in."""
+    password: str
 
 
 class CreateConversationRequest(BaseModel):
@@ -64,14 +63,52 @@ async def root():
     return {"status": "ok", "service": "LLM Council API"}
 
 
+@app.get("/api/auth/status")
+async def auth_status(request: Request):
+    """Check if user is authenticated and if auth is required."""
+    auth_required = bool(AUTH_PASSWORD)
+    token = get_session_token(request)
+    authenticated = validate_session(token) if auth_required else True
+    return {"authenticated": authenticated, "auth_required": auth_required}
+
+
+@app.post("/api/auth/login")
+async def login(request: LoginRequest, response: Response):
+    """Log in with password."""
+    if not verify_password(request.password):
+        raise HTTPException(status_code=401, detail="Invalid password")
+    token = create_session()
+    # Use secure cookies if any origin uses HTTPS
+    is_https = any(origin.startswith("https://") for origin in CORS_ORIGINS)
+    response.set_cookie(
+        key="session",
+        value=token,
+        httponly=True,
+        secure=is_https,
+        samesite="lax" if not is_https else "none",
+        max_age=60 * 60 * 24 * 30,  # 30 days
+    )
+    return {"status": "ok"}
+
+
+@app.post("/api/auth/logout")
+async def logout(request: Request, response: Response):
+    """Log out and clear session."""
+    token = get_session_token(request)
+    if token:
+        delete_session(token)
+    response.delete_cookie(key="session")
+    return {"status": "ok"}
+
+
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
-async def list_conversations():
+async def list_conversations(request: Request, _: None = Depends(require_auth)):
     """List all conversations (metadata only)."""
     return storage.list_conversations()
 
 
 @app.post("/api/conversations", response_model=Conversation)
-async def create_conversation(request: CreateConversationRequest):
+async def create_conversation(request: Request, body: CreateConversationRequest, _: None = Depends(require_auth)):
     """Create a new conversation."""
     conversation_id = str(uuid.uuid4())
     conversation = storage.create_conversation(conversation_id)
@@ -79,7 +116,7 @@ async def create_conversation(request: CreateConversationRequest):
 
 
 @app.get("/api/conversations/{conversation_id}", response_model=Conversation)
-async def get_conversation(conversation_id: str):
+async def get_conversation(request: Request, conversation_id: str, _: None = Depends(require_auth)):
     """Get a specific conversation with all its messages."""
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
@@ -88,7 +125,7 @@ async def get_conversation(conversation_id: str):
 
 
 @app.post("/api/conversations/{conversation_id}/message")
-async def send_message(conversation_id: str, request: SendMessageRequest):
+async def send_message(request: Request, conversation_id: str, body: SendMessageRequest, _: None = Depends(require_auth)):
     """
     Send a message and run the 3-stage council process.
     Returns the complete response with all stages.
@@ -102,16 +139,16 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     is_first_message = len(conversation["messages"]) == 0
 
     # Add user message
-    storage.add_user_message(conversation_id, request.content)
+    storage.add_user_message(conversation_id, body.content)
 
     # If this is the first message, generate a title
     if is_first_message:
-        title = await generate_conversation_title(request.content)
+        title = await generate_conversation_title(body.content)
         storage.update_conversation_title(conversation_id, title)
 
     # Run the 3-stage council process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content
+        body.content
     )
 
     # Add assistant message with all stages
@@ -132,7 +169,7 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 
 
 @app.post("/api/conversations/{conversation_id}/message/stream")
-async def send_message_stream(conversation_id: str, request: SendMessageRequest):
+async def send_message_stream(request: Request, conversation_id: str, body: SendMessageRequest, _: None = Depends(require_auth)):
     """
     Send a message and stream the 3-stage council process.
     Returns Server-Sent Events as each stage completes.
@@ -148,27 +185,27 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     async def event_generator():
         try:
             # Add user message
-            storage.add_user_message(conversation_id, request.content)
+            storage.add_user_message(conversation_id, body.content)
 
             # Start title generation in parallel (don't await yet)
             title_task = None
             if is_first_message:
-                title_task = asyncio.create_task(generate_conversation_title(request.content))
+                title_task = asyncio.create_task(generate_conversation_title(body.content))
 
             # Stage 1: Collect responses
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content)
+            stage1_results = await stage1_collect_responses(body.content)
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
             # Stage 2: Collect rankings
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
+            stage2_results, label_to_model = await stage2_collect_rankings(body.content, stage1_results)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
+            stage3_result = await stage3_synthesize_final(body.content, stage1_results, stage2_results)
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
             # Wait for title generation if it was started

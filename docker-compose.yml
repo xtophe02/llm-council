@@ -3,12 +3,22 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    ports:
-      - "8001:8001"
+    container_name: llm-council-backend
+    restart: unless-stopped
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+      - CORS_ORIGINS=https://llm-council.chris-space.com
     volumes:
       - ./data:/app/data
+    networks:
+      - traefik-public
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.llm-council-api.rule=Host(`llm-council.chris-space.com`) && PathPrefix(`/api`)
+      - traefik.http.routers.llm-council-api.entrypoints=websecure
+      - traefik.http.routers.llm-council-api.tls.certresolver=letsencrypt
+      - traefik.http.services.llm-council-api.loadbalancer.server.port=8001
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/"]
       interval: 30s
@@ -21,9 +31,21 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE=http://localhost:8001
-    ports:
-      - "3000-3010:80"
+        - VITE_API_BASE=https://llm-council.chris-space.com
+    container_name: llm-council-frontend
+    restart: unless-stopped
+    networks:
+      - traefik-public
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.llm-council.rule=Host(`llm-council.chris-space.com`)
+      - traefik.http.routers.llm-council.entrypoints=websecure
+      - traefik.http.routers.llm-council.tls.certresolver=letsencrypt
+      - traefik.http.services.llm-council.loadbalancer.server.port=80
     depends_on:
       backend:
         condition: service_healthy
+
+networks:
+  traefik-public:
+    external: true

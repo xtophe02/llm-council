@@ -24,3 +24,9 @@ OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
+
+# Authentication password (required for production)
+AUTH_PASSWORD = os.getenv("AUTH_PASSWORD")
+
+# CORS origins (comma-separated for multiple)
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")

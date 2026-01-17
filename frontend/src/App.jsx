@@ -1,19 +1,42 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
+import { Login } from './components/Login';
 import { api } from './api';
 import './App.css';
 
 function App() {
+  const [authState, setAuthState] = useState({ checked: false, authenticated: false });
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Load conversations on mount
+  // Check auth status on mount
   useEffect(() => {
-    loadConversations();
+    checkAuth();
   }, []);
+
+  const checkAuth = async () => {
+    try {
+      const status = await api.checkAuth();
+      setAuthState({
+        checked: true,
+        authenticated: status.authenticated || !status.auth_required,
+      });
+      if (status.authenticated || !status.auth_required) {
+        loadConversations();
+      }
+    } catch (error) {
+      console.error('Failed to check auth:', error);
+      setAuthState({ checked: true, authenticated: false });
+    }
+  };
+
+  const handleLogin = () => {
+    setAuthState({ checked: true, authenticated: true });
+    loadConversations();
+  };
 
   // Load conversation details when selected
   useEffect(() => {
@@ -180,6 +203,16 @@ function App() {
       setIsLoading(false);
     }
   };
+
+  // Show loading while checking auth
+  if (!authState.checked) {
+    return null;
+  }
+
+  // Show login if not authenticated
+  if (!authState.authenticated) {
+    return <Login onLogin={handleLogin} />;
+  }
 
   return (
     <div className="app">
