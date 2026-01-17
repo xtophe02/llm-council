@@ -29,4 +29,12 @@ DATA_DIR = "data/conversations"
 AUTH_PASSWORD = os.getenv("AUTH_PASSWORD")
 
 # CORS origins (comma-separated for multiple)
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+# Include port range 3000-3010 for Docker's dynamic port allocation
+_default_origins = ",".join([
+    "http://localhost:5173",
+    *[f"http://localhost:{p}" for p in range(3000, 3011)]
+])
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", _default_origins).split(",")
+
+# Tavily API key for web search (optional, enables recent info retrieval)
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")

@@ -1,21 +1,40 @@
 """3-stage LLM Council orchestration."""
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .tavily_search import get_search_context
 
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+async def stage1_collect_responses(
+    user_query: str,
+    web_context: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
     Args:
         user_query: The user's question
+        web_context: Optional web search context to prepend
 
     Returns:
         List of dicts with 'model' and 'response' keys
     """
-    messages = [{"role": "user", "content": user_query}]
+    # Build the prompt, optionally including web search context
+    if web_context:
+        prompt = f"""The following web search results may be helpful for answering the question:
+
+{web_context}
+
+---
+
+Question: {user_query}
+
+Please answer the question, using the web search results above if relevant."""
+    else:
+        prompt = user_query
+
+    messages = [{"role": "user", "content": prompt}]
 
     # Query all models in parallel
     responses = await query_models_parallel(COUNCIL_MODELS, messages)
@@ -303,8 +322,11 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
-    # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
+    # Check if web search is needed and fetch context
+    web_context = await get_search_context(user_query)
+
+    # Stage 1: Collect individual responses (with web context if available)
+    stage1_results = await stage1_collect_responses(user_query, web_context)
 
     # If no models responded successfully, return error
     if not stage1_results:
@@ -329,7 +351,8 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     # Prepare metadata
     metadata = {
         "label_to_model": label_to_model,
-        "aggregate_rankings": aggregate_rankings
+        "aggregate_rankings": aggregate_rankings,
+        "web_search_used": web_context is not None
     }
 
     return stage1_results, stage2_results, stage3_result, metadata

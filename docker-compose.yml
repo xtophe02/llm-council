@@ -9,6 +9,7 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - AUTH_PASSWORD=${AUTH_PASSWORD}
       - CORS_ORIGINS=https://llm-council.chris-space.com
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
     volumes:
       - ./data:/app/data
     networks:

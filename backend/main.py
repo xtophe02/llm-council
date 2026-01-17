@@ -11,6 +11,7 @@ import asyncio
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .tavily_search import get_search_context
 from .auth import verify_password, create_session, delete_session, get_session_token, require_auth, validate_session
 from .config import AUTH_PASSWORD, CORS_ORIGINS
 
@@ -192,16 +193,22 @@ async def send_message_stream(request: Request, conversation_id: str, body: Send
             if is_first_message:
                 title_task = asyncio.create_task(generate_conversation_title(body.content))
 
-            # Stage 1: Collect responses
+            # Check if web search is needed
+            yield f"data: {json.dumps({'type': 'web_search_start'})}\n\n"
+            web_context = await get_search_context(body.content)
+            web_search_used = web_context is not None
+            yield f"data: {json.dumps({'type': 'web_search_complete', 'data': {'used': web_search_used}})}\n\n"
+
+            # Stage 1: Collect responses (with web context if available)
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(body.content)
+            stage1_results = await stage1_collect_responses(body.content, web_context)
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
             # Stage 2: Collect rankings
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
             stage2_results, label_to_model = await stage2_collect_rankings(body.content, stage1_results)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
+            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings, 'web_search_used': web_search_used}})}\n\n"
 
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
